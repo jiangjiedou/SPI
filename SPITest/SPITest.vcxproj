@@ -72,8 +72,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>C:\Users\pc\Documents\Visual Studio 2013\Projects\SPITest\SPITest\include;C:\Users\pc\Documents\Visual Studio 2013\Projects\SPITest\SPITest\include\windows;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\Users\pc\Documents\Visual Studio 2013\Projects\SPITest\SPITest\lib\windows\x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(IncludePath)</IncludePath>
+    <LibraryPath>.\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>

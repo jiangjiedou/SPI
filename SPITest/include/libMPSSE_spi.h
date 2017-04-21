@@ -29,7 +29,8 @@
 #ifndef LIBMPSSE_SPI_H
 #define LIBMPSSE_SPI_H
 
-#include "ftd2xx.h"
+
+#include "../SPITest/include/windows/ftd2xx.h"
 
 
 /******************************************************************************/

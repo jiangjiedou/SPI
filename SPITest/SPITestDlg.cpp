@@ -7,13 +7,14 @@
 #include "SPITestDlg.h"
 #include "afxdialogex.h"
 
-#include "libMPSSE_spi.h"
-#include "ftd2xx.h"
+#include "../SPITest/include/libMPSSE_spi.h"
+#include "../SPITest/include/windows/ftd2xx.h"
 #include "windows.h"
 #include <iostream>
 #include <fstream>
 #include <ostream>
 #include <tchar.h>
+#include <sstream>  
 
 using namespace std;
 #ifdef _WIN32
@@ -57,31 +58,14 @@ uint32 channels;
 uint8  m_txt = 0x00;
 FT_HANDLE ftHandle;
 ChannelConfig channelConf;
+bool spiOpened;
 uint8 buffer[SPI_DEVICE_BUFFER_SIZE];
 
 
 ofstream logfile;
-/*ofstream logfile;
-logfile.open(".F:\.demo.txt");
-if (!logfile.is_open())
-cout<< "Failed to openlog file " << endl;
-
-logfile << "ca1=[";
-for (int k = 0; k < 1023; k++)
-{
-
-	if (k % 80 == 0)
-		logfile << "..." << endl;
-
-	logfile << ca[k] << " ";
-
-}
-logfile << "];" << endl << endl;
-logfile.close();
-*/
 
 
-FT_STATUS write_byte(uint8 * buffer,int length)
+FT_STATUS writeByte(uint8 * buffer,int length)
 
 {
 	uint32 sizeToTransfer = 0;
@@ -90,24 +74,23 @@ FT_STATUS write_byte(uint8 * buffer,int length)
 	uint32 retry = 0;
 	FT_STATUS status;
 
-
-	/* Write Data to 23S08's OLAT Register */
-	sizeToTransfer = 8 *length ;  // 3 Bytes Opcodes + Data
+	sizeToTransfer = 8 *length ;
 	sizeTransfered = 0;
-	//buffer[0] = 0x40;  //  Opcode to select device
-	//buffer[1] = 0x0A;  //  Opcode for OLAT Register
-	
-	
+	if (spiOpened)
+	{
 
-	status = p_SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+		status = p_SPI_Write(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+			SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
+			SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
+			SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+		return status;
+	}
 
-	return status;
+	return false;
+
 }
 
-FT_STATUS read_byte(uint8 * buffer)
+FT_STATUS readByte(uint8 * buffer, int length)
 {
 	uint32 sizeToTransfer = 0;
 	uint32 sizeTransfered = 0;
@@ -117,18 +100,18 @@ FT_STATUS read_byte(uint8 * buffer)
 	FT_STATUS status;
 
 	
-	sizeToTransfer = 8;  //3 Bytes Opcodes and Data
+	sizeToTransfer = 8 * length;
 	sizeTransfered = 0;
-	//buffer[0] = 0x00; // Opcode to select device 
-	//buffer[1] = 0x00; // Opcode for IODIR register
-	//buffer[2] = 0x00; // Data Packet - Make GPIO pins outputs
-	status = p_SPI_Read(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
-		SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
-		SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+	if (spiOpened)
+	{
+		status = p_SPI_Read(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+			SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
+			SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
+			SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
+		return status;
+	}
 
-
-	return status;
+	return false;
 }
 
 
@@ -181,23 +164,24 @@ CSPITestDlg::CSPITestDlg(CWnd* pParent /*=NULL*/)
 void CSPITestDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
-	DDX_Control(pDX, IDC_BUTTON1, m_time);
-	DDX_Control(pDX, IDC_EDIT1, m_txt);
-	DDX_Control(pDX, IDC_EDIT2, m_txt2);
+	DDX_Control(pDX, IDC_MODE_SEL, modeSel);
+	//  DDX_Control(pDX, IDC_READCNT, sendCnt);
+	DDX_Control(pDX, IDC_RECVCONTENT, recvContent);
+	DDX_Control(pDX, IDC_SENDCONTENT, sendContent);
+	DDX_Control(pDX, IDC_READCNT, rdCount);
 }
 
 BEGIN_MESSAGE_MAP(CSPITestDlg, CDialogEx)
 	ON_WM_SYSCOMMAND()
-	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
-	ON_BN_CLICKED(IDC_BUTTON1, &CSPITestDlg::OnBnClickedButton1)
-	ON_WM_TIMER()
-	ON_EN_CHANGE(IDC_EDIT1, &CSPITestDlg::OnEnChangeEdit1)
-	ON_BN_CLICKED(IDOK, &CSPITestDlg::OnBnClickedOk)
-	ON_BN_CLICKED(IDCANCEL, &CSPITestDlg::OnBnClickedCancel)
-	ON_BN_CLICKED(IDC_BUTTON2, &CSPITestDlg::OnBnClickedButton2)
-	ON_CBN_SELCHANGE(IDC_COMBO2, &CSPITestDlg::OnCbnSelchangeCombo2)
-	ON_BN_CLICKED(IDC_CHECK2, &CSPITestDlg::OnBnClickedCheck2)
+	ON_CBN_SELCHANGE(IDC_MODE_SEL, &CSPITestDlg::OnCbnSelchangeModeSel)
+	ON_WM_CHAR()
+	ON_BN_CLICKED(IDC_SEND, &CSPITestDlg::OnBnClickedSend)
+	ON_BN_CLICKED(IDC_CLEARSEND, &CSPITestDlg::OnBnClickedClearsend)
+	ON_BN_CLICKED(IDC_CLEARRECV, &CSPITestDlg::OnBnClickedClearrecv)
+	ON_BN_CLICKED(IDC_RECEIVE, &CSPITestDlg::OnBnClickedReceive)
+	ON_CBN_SELCHANGE(IDC_READCNT, &CSPITestDlg::OnCbnSelchangeReadcnt)
+	ON_EN_CHANGE(IDC_SENDCONTENT, &CSPITestDlg::OnEnChangeSendcontent)
 END_MESSAGE_MAP()
 
 
@@ -239,67 +223,10 @@ BOOL CSPITestDlg::OnInitDialog()
 	if (!logfile.is_open())
 		cerr << "Failed to openlog file " << endl;
 
-	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
-}
+	modeSel.SetCurSel(0);
+	rdCount.SetCurSel(0);
+	//try open the SPI
 
-void CSPITestDlg::OnSysCommand(UINT nID, LPARAM lParam)
-{
-	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
-	{
-		CAboutDlg dlgAbout;
-		dlgAbout.DoModal();
-	}
-	else
-	{
-		CDialogEx::OnSysCommand(nID, lParam);
-	}
-}
-
-// 如果向对话框添加最小化按钮，则需要下面的代码
-//  来绘制该图标。  对于使用文档/视图模型的 MFC 应用程序，
-//  这将由框架自动完成。
-
-void CSPITestDlg::OnPaint()
-{
-	if (IsIconic())
-	{
-		CPaintDC dc(this); // 用于绘制的设备上下文
-
-		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
-
-		// 使图标在工作区矩形中居中
-		int cxIcon = GetSystemMetrics(SM_CXICON);
-		int cyIcon = GetSystemMetrics(SM_CYICON);
-		CRect rect;
-		GetClientRect(&rect);
-		int x = (rect.Width() - cxIcon + 1) / 2;
-		int y = (rect.Height() - cyIcon + 1) / 2;
-
-		// 绘制图标
-		dc.DrawIcon(x, y, m_hIcon);
-	}
-	else
-	{
-		CDialogEx::OnPaint();
-	}
-}
-
-//当用户拖动最小化窗口时系统调用此函数取得光标
-//显示。
-HCURSOR CSPITestDlg::OnQueryDragIcon()
-{
-	return static_cast<HCURSOR>(m_hIcon);
-}
-
-
-
-void CSPITestDlg::OnBnClickedButton1()
-{
-	// TODO:  在此添加控件通知处理程序代码
-	SetTimer(1, 1000, NULL);
-
-	logfile << "SetTimer 1ms" << endl << endl;
-	
 #ifdef _WIN32
 #ifdef _MSC_VER
 	HMODULE h_libMPSSE;
@@ -334,117 +261,184 @@ void CSPITestDlg::OnBnClickedButton1()
 
 
 	status = p_SPI_GetNumChannels(&channels);
-//	printf("Number of available SPI channels = %d\n", channels);
+	//	printf("Number of available SPI channels = %d\n", channels);
 
 
 	status = p_SPI_OpenChannel(CHANNEL_TO_OPEN, &ftHandle); // Open the first available channel
 
 	status = p_SPI_InitChannel(ftHandle, &channelConf);
 
-//	printf("Enter a hex value to display in binary -  ");
-
-	//read in a hex value from standard input
-//	scanf_s("%x", &LEDS);
-	logfile << "OpenSPI" << endl << endl;
-
-//printf("End of SPI Demo");
-//	status = p_SPI_CloseChannel(ftHandle);
-	Sleep(2000);
-}
-
-
-void CSPITestDlg::OnTimer(UINT_PTR nIDEvent)
-{
-	uint8 buffer[8];
-	
-	CString strText;
-	m_txt.GetWindowTextW(strText);
-	memcpy(buffer, (LPCSTR)strText.GetBuffer(0), strText.GetAllocLength());
-	buffer[0] = 'a';
-	buffer[1] = 'b';
-	// TODO:  在此添加消息处理程序代码和/或调用默认值
-	/*switch (nIDEvent)
-
+	if (status == 0)
 	{
-	case 1:*/
-	logfile << "TimerWrite" << endl << endl;
-		write_byte(buffer,2);
-		read_byte(buffer);
-		write_byte(buffer,2);
-		read_byte(buffer);
-		write_byte(buffer,2);
-		read_byte(buffer);
-		//TCHAR A;
-	//	wstring str;
-		//A = read_byte();
-	//	str = uint8 *buffer.read_byte();
-		m_txt2.SetWindowTextW((LPCTSTR)buffer);
-		//printf("1");
-	
-		//break;
-	    //default:
-		//break;
-	//}
-	
+		logfile << "SPI Open error" << endl << endl;
+		spiOpened = false;
+	}
+	else
+	{
 
-	CDialogEx::OnTimer(nIDEvent);
+		logfile << "OpenSPI" << endl << endl;
+		spiOpened = true;
+	}
+
+
+	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
+}
+
+void CSPITestDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
+	{
+		CAboutDlg dlgAbout;
+		dlgAbout.DoModal();
+	}
+	else
+	{
+		CDialogEx::OnSysCommand(nID, lParam);
+	}
+}
+
+//当用户拖动最小化窗口时系统调用此函数取得光标
+//显示。
+HCURSOR CSPITestDlg::OnQueryDragIcon()
+{
+	return static_cast<HCURSOR>(m_hIcon);
 }
 
 
-void CSPITestDlg::OnEnChangeEdit1()
+void CSPITestDlg::OnCbnSelchangeModeSel()
 {
-	CString txt;
-	m_txt.GetWindowTextW(txt);
+	// TODO:  在此添加控件通知处理程序代码
+	if (modeSel.GetCurSel() != 1)
+	{
+		if (ftHandle != NULL)
+		p_SPI_CloseChannel(ftHandle); //close the SPI
+	}
+}
+
+
+
+
+BOOL CSPITestDlg::PreTranslateMessage(MSG* pMsg)
+{
+	// TODO:  在此添加专用代码和/或调用基类
+	if (WM_CHAR == pMsg->message && ((GetFocus() == GetDlgItem(IDC_SENDCONTENT)) ))
+	{
+		if (((pMsg->wParam >= 0x30) && (pMsg->wParam <= 0x39)) || ((pMsg->wParam >= 'a') && (pMsg->wParam <= 'f') || (pMsg->wParam >= 'a')) 
+			|| ((pMsg->wParam >= 'A') && (pMsg->wParam <= 'F')) || (pMsg->wParam <= 'BS'))
+		{
+			return CDialogEx::PreTranslateMessage(pMsg);
+		}
+		else
+		{
+			MessageBeep(-1);
+			pMsg->wParam = NULL;
+			return false;
+		}
+	}
+	else
+	{
+		return CDialogEx::PreTranslateMessage(pMsg);
+	}
+
+
+}
+
+
+void CSPITestDlg::OnBnClickedSend()
+{
+	// TODO:  在此添加控件通知处理程序代码
+	CString strText;
+	sendContent.GetWindowText(strText);
+
+	const size_t strsize = (strText.GetLength() + 1) * 2; // 宽字符的长度;
+	char * pstr = new char[strsize]; //分配空间;
+	size_t sz = 0;
+	wcstombs_s(&sz, pstr, strsize, strText, _TRUNCATE);
+
+//	strcpy(pstr, (LPCTSTR)strText);
+	char * leftover;
+	int num = strtoul(pstr, &leftover, 16);
+
+
+	int length = strText.GetLength();
+	uint8* buffer = new uint8(length);
+	uint8* hexValue = new uint8(length/2);
+	memcpy(buffer, (LPCSTR)strText.GetBuffer(0), length);
+	hexValue[0] = buffer[0] << 4 + buffer[1];
 	
+	writeByte((uint8 * )buffer, length);
+}
+
+
+void CSPITestDlg::OnBnClickedClearsend()
+{
+	// TODO:  在此添加控件通知处理程序代码
+	sendContent.SetWindowTextW(_T(""));
+}
+
+
+void CSPITestDlg::OnBnClickedClearrecv()
+{
+	// TODO:  
+	recvContent.SetWindowTextW(_T(""));
+	
+	recvContent.Clear();
+}
+
+
+
+CString toCString(string str) {
+#ifdef _UNICODE  
+	//如果是unicode工程  
+	USES_CONVERSION; CString s(str.c_str());
+	CString ans(str.c_str());
+	return ans;
+#else  
+	//如果是多字节工程   
+	//string 转 CString  
+	CString ans;
+	ans.Format("%s", str.c_str());
+	return ans;
+#endif // _UNICODE    
+}
+
+void CSPITestDlg::OnBnClickedReceive()
+{
+	// TODO:  在此添加控件通知处理程序代码
+	CString rdCntStr;
+	rdCount.GetLBText(rdCount.GetCurSel(), rdCntStr);
+	int rdCnt = _ttoi(rdCntStr);
+
+
+	uint8* buffer = new uint8(rdCnt);
+	readByte((uint8 *)buffer, rdCnt);
+
+	stringstream ss;
+	for (int i=0; i < rdCnt;i++)
+		ss << buffer[i];
+
+	string gstr = ss.str();
+	CString cstr = toCString(gstr);
+	recvContent.SetWindowTextW(cstr);
+
+
+
+
+}
+
+
+void CSPITestDlg::OnCbnSelchangeReadcnt()
+{
+	// TODO:  在此添加控件通知处理程序代码
+}
+
+
+void CSPITestDlg::OnEnChangeSendcontent()
+{
 	// TODO:  如果该控件是 RICHEDIT 控件，它将不
 	// 发送此通知，除非重写 CDialogEx::OnInitDialog()
 	// 函数并调用 CRichEditCtrl().SetEventMask()，
 	// 同时将 ENM_CHANGE 标志“或”运算到掩码中。
 
-	// TODO:  在此添加控件通知处理程序代码
-}
-
-
-
-
-void CSPITestDlg::OnBnClickedOk()
-{
-	// TODO:  在此添加控件通知处理程序代码
-	CDialogEx::OnOK();
-}
-
-
-void CSPITestDlg::OnBnClickedCancel()
-{
-	// TODO:  在此添加控件通知处理程序代码
-	CDialogEx::OnCancel();
-
-}
-
-
-void CSPITestDlg::OnBnClickedButton2()
-{
-
-	KillTimer(1);
-	p_SPI_CloseChannel(ftHandle);
-
-	logfile << "Close SPI" << endl << endl;
-
-
-	logfile.close();
-	// TODO:  在此添加控件通知处理程序代码
-}
-
-
-void CSPITestDlg::OnCbnSelchangeCombo2()
-{
-	// TODO:  在此添加控件通知处理程序代码
-
-
-}
-
-
-void CSPITestDlg::OnBnClickedCheck2()
-{
 	// TODO:  在此添加控件通知处理程序代码
 }
