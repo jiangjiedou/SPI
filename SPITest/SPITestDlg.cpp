@@ -6,6 +6,7 @@
 #include "SPITest.h"
 #include "SPITestDlg.h"
 #include "afxdialogex.h"
+#include "stdio.h"
 
 #include "../SPITest/include/libMPSSE_spi.h"
 #include "../SPITest/include/windows/ftd2xx.h"
@@ -53,7 +54,8 @@ typedef FT_STATUS(*pfunc_SPI_Write)(FT_HANDLE handle, uint8 *buffer, uint32 size
 pfunc_SPI_Write p_SPI_Write;
 typedef FT_STATUS(*pfunc_SPI_IsBusy)(FT_HANDLE handle, bool *state);
 pfunc_SPI_IsBusy p_SPI_IsBusy;
-
+typedef FT_STATUS (*pfunc_SPI_ReadWrite)(FT_HANDLE handle, uint8 *inBuffer, uint8 *outBuffer, uint32 sizeToTransfer, uint32 *sizeTransferred, uint32 transferOptions);
+pfunc_SPI_ReadWrite p_SPI_ReadWrite;
 uint32 channels;
 uint8  m_txt = 0x00;
 FT_HANDLE ftHandle;
@@ -90,7 +92,7 @@ FT_STATUS writeByte(uint8 * buffer,int length)
 
 }
 
-FT_STATUS readByte(uint8 * buffer, int length)
+FT_STATUS readByte(uint8 * pAddr, uint8 * inBuf, int length)
 {
 	uint32 sizeToTransfer = 0;
 	uint32 sizeTransfered = 0;
@@ -99,14 +101,22 @@ FT_STATUS readByte(uint8 * buffer, int length)
 	bool state;
 	FT_STATUS status;
 
-	
+
+
+	uint8* outBuf = new uint8(length);
+
+
 	sizeToTransfer = 8 * length;
 	sizeTransfered = 0;
 	if (spiOpened)
 	{
-		status = p_SPI_Read(ftHandle, buffer, sizeToTransfer, &sizeTransfered,
+
+		p_SPI_Write(ftHandle, pAddr, 8, &sizeTransfered,
 			SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
-			SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE |
+			SPI_TRANSFER_OPTIONS_CHIPSELECT_ENABLE);
+
+		status = p_SPI_ReadWrite(ftHandle, inBuf, outBuf, sizeToTransfer, &sizeTransfered,
+			SPI_TRANSFER_OPTIONS_SIZE_IN_BITS |
 			SPI_TRANSFER_OPTIONS_CHIPSELECT_DISABLE);
 		return status;
 	}
@@ -257,6 +267,7 @@ BOOL CSPITestDlg::OnInitDialog()
 	p_SPI_InitChannel = (pfunc_SPI_InitChannel)GET_FUN_POINTER(h_libMPSSE, "SPI_InitChannel");
 	p_SPI_Read = (pfunc_SPI_Read)GET_FUN_POINTER(h_libMPSSE, "SPI_Read");
 	p_SPI_Write = (pfunc_SPI_Write)GET_FUN_POINTER(h_libMPSSE, "SPI_Write");
+	p_SPI_ReadWrite = (pfunc_SPI_ReadWrite)GET_FUN_POINTER(h_libMPSSE, "SPI_ReadWrite");
 	p_SPI_CloseChannel = (pfunc_SPI_CloseChannel)GET_FUN_POINTER(h_libMPSSE, "SPI_CloseChannel");
 
 
@@ -268,7 +279,7 @@ BOOL CSPITestDlg::OnInitDialog()
 
 	status = p_SPI_InitChannel(ftHandle, &channelConf);
 
-	if (status == 0)
+	if (status != 0)
 	{
 		logfile << "SPI Open error" << endl << endl;
 		spiOpened = false;
@@ -363,7 +374,7 @@ void CSPITestDlg::OnBnClickedSend()
 	int length = strText.GetLength();
 	uint8* buffer = new uint8(length);
 	uint8* hexValue = new uint8(length/2);
-	memcpy(buffer, (LPCSTR)strText.GetBuffer(0), length);
+	memcpy(buffer, (LPCSTR)strText.GetBuffer(), length);
 	hexValue[0] = buffer[0] << 4 + buffer[1];
 	
 	writeByte((uint8 * )buffer, length);
@@ -405,23 +416,34 @@ CString toCString(string str) {
 void CSPITestDlg::OnBnClickedReceive()
 {
 	// TODO:  在此添加控件通知处理程序代码
-	CString rdCntStr;
+    CString rdCntStr;
 	rdCount.GetLBText(rdCount.GetCurSel(), rdCntStr);
 	int rdCnt = _ttoi(rdCntStr);
 
-
-	uint8* buffer = new uint8(rdCnt);
-	readByte((uint8 *)buffer, rdCnt);
-
-	stringstream ss;
-	for (int i=0; i < rdCnt;i++)
-		ss << buffer[i];
-
-	string gstr = ss.str();
-	CString cstr = toCString(gstr);
-	recvContent.SetWindowTextW(cstr);
+	rdCnt = 1;
+	uint8* inBuf = new uint8(rdCnt+1);
+	uint8 addr = 0xF0;
+	uint32 sizeToTransfer = 8;
+	uint32 sizeTransfered = 0;
 
 
+	readByte(&addr, (uint8 *)inBuf, rdCnt);
+	inBuf[rdCnt] = '\0';
+
+	bool writeComplete = 0;
+	uint32 retry = 0;
+	bool state;
+
+	char* strBuf = new char(rdCnt*2 + 1);
+
+	sprintf(strBuf, "%X", *inBuf);
+
+	CString cstr(strBuf);
+
+	CString oldStr;
+	recvContent.GetWindowTextW(oldStr);
+
+	recvContent.SetWindowTextW(LPCTSTR(oldStr+cstr));
 
 
 }
